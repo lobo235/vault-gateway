@@ -1,0 +1,40 @@
+version: "2"
+
+linters:
+  enable:
+    - errcheck      # unhandled errors
+    - govet         # go vet checks
+    - staticcheck   # static analysis (includes gosimple in v2)
+    - unused        # unused code
+    - gocyclo       # cyclomatic complexity
+    - misspell      # typos in comments/strings
+    - revive        # idiomatic Go style
+
+  settings:
+    gocyclo:
+      min-complexity: 20
+    revive:
+      rules:
+        - name: exported
+          severity: warning
+
+  exclusions:
+    rules:
+      # Test helpers commonly omit error checks on json encode/decode and w.Write —
+      # if encoding fails the test will fail for other observable reasons.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - revive
+
+formatters:
+  enable:
+    - goimports     # import ordering
+
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/lobo235/vault-gateway
+
+issues:
+  max-same-issues: 0

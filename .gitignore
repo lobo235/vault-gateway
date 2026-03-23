@@ -1,0 +1,17 @@
+# Secrets
+.env
+
+# Build output
+vault-gateway
+/dist/
+
+# Go
+vendor/
+coverage.out
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
