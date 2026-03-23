@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Docker build workflow resolves version from git tags for non-tag builds
+
 ## [v1.0.0] - 2026-03-23
 
 ### Added
