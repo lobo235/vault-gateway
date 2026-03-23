@@ -18,7 +18,7 @@ job "vault-gateway" {
       config {
         image = "ghcr.io/lobo235/vault-gateway:latest"
         ports = ["http"]
-        volumes = ["/mnt/data/homelab-ai/vault-gateway/data:/data"]
+        volumes = ["/path/to/data:/data"]
       }
 
       env {
