@@ -1,15 +1,52 @@
 job "vault-gateway" {
+  node_pool   = "default"
   datacenters = ["dc1"]
   type        = "service"
-  node_pool   = "default"
 
   group "vault-gateway" {
     count = 1
 
     network {
       port "http" {
-        static = 8080
+        to = 8080
       }
+    }
+
+    service {
+      name     = "vault-gateway"
+      port     = "http"
+      provider = "consul"
+      tags = [
+        "traefik.enable=true",
+        "traefik.http.routers.vault-gateway.rule=Host(`vault-gateway.example.com`)",
+        "traefik.http.routers.vault-gateway.entrypoints=websecure",
+        "traefik.http.routers.vault-gateway.tls=true",
+      ]
+
+      check {
+        type     = "http"
+        path     = "/health"
+        port     = "http"
+        interval = "30s"
+        timeout  = "5s"
+
+        check_restart {
+          limit = 3
+          grace = "30s"
+        }
+      }
+    }
+
+    restart {
+      attempts = 3
+      interval = "2m"
+      delay    = "15s"
+      mode     = "fail"
+    }
+
+    vault {
+      cluster     = "default"
+      change_mode = "restart"
     }
 
     task "vault-gateway" {
@@ -18,23 +55,24 @@ job "vault-gateway" {
       config {
         image = "ghcr.io/lobo235/vault-gateway:latest"
         ports = ["http"]
-        volumes = ["/path/to/data:/data"]
-      }
-
-      env {
-        PORT      = "${NOMAD_PORT_http}"
-        LOG_LEVEL = "info"
       }
 
       template {
-        data        = <<-EOF
-          VAULT_ADDR={{ with nomadVar "nomad/jobs/vault-gateway" }}{{ .vault_addr }}{{ end }}
-          VAULT_ROLE_ID={{ with nomadVar "nomad/jobs/vault-gateway" }}{{ .vault_role_id }}{{ end }}
-          VAULT_SECRET_ID={{ with nomadVar "nomad/jobs/vault-gateway" }}{{ .vault_secret_id }}{{ end }}
-          GATEWAY_API_KEY={{ with nomadVar "nomad/jobs/vault-gateway" }}{{ .gateway_api_key }}{{ end }}
-        EOF
-        destination = "secrets/env.env"
+        data = <<EOF
+{{ with secret "kv/data/nomad/default/vault-gateway" }}
+VAULT_ROLE_ID={{ .Data.data.vault_role_id }}
+VAULT_SECRET_ID={{ .Data.data.vault_secret_id }}
+GATEWAY_API_KEY={{ .Data.data.gateway_api_key }}
+{{ end }}
+EOF
+        destination = "secrets/vault-gateway.env"
         env         = true
+      }
+
+      env {
+        PORT       = "8080"
+        LOG_LEVEL  = "info"
+        VAULT_ADDR = "https://vault.example.com:8200"
       }
 
       resources {
@@ -42,18 +80,7 @@ job "vault-gateway" {
         memory = 64
       }
 
-      service {
-        name = "vault-gateway"
-        port = "http"
-        tags = ["http"]
-
-        check {
-          type     = "http"
-          path     = "/health"
-          interval = "15s"
-          timeout  = "5s"
-        }
-      }
+      kill_timeout = "35s"
     }
   }
 }
