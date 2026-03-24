@@ -2,6 +2,7 @@ package vault
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -121,8 +122,14 @@ func (c *Client) tokenTTL() time.Duration {
 	if !ok {
 		return 0
 	}
-	// Vault returns ttl as a json.Number
+	// Vault returns ttl as a json.Number (the Vault API client uses json.UseNumber).
 	switch v := ttlRaw.(type) {
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil {
+			return 0
+		}
+		return time.Duration(f) * time.Second
 	case float64:
 		return time.Duration(v) * time.Second
 	case int:

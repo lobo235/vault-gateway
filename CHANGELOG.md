@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v1.0.1] - 2026-03-24
+
+### Fixed
+- Token TTL parsing handles `json.Number` type from Vault API — was always falling back to 60s renewal interval instead of using actual token TTL
+
 ### Changed
 - Docker build workflow resolves version from git tags for non-tag builds
 

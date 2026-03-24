@@ -539,9 +539,7 @@ func TestClose_Idempotent(t *testing.T) {
 
 func TestTokenTTL_JsonNumber(t *testing.T) {
 	// The Vault API client uses json.NewDecoder with UseNumber(), so numeric
-	// values come through as json.Number, not float64 or int. The current
-	// tokenTTL switch only handles float64 and int, so json.Number hits the
-	// default branch and returns 0. This test documents that behavior.
+	// values come through as json.Number. tokenTTL handles this correctly.
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/auth/token/lookup-self" {
 			w.Header().Set("Content-Type", "application/json")
@@ -556,9 +554,8 @@ func TestTokenTTL_JsonNumber(t *testing.T) {
 	defer c.Close()
 
 	ttl := c.tokenTTL()
-	// json.Number hits the default case, returning 0
-	if ttl != 0 {
-		t.Errorf("tokenTTL() = %v, want 0 (json.Number hits default branch)", ttl)
+	if ttl != 3600*time.Second {
+		t.Errorf("tokenTTL() = %v, want %v", ttl, 3600*time.Second)
 	}
 }
 
