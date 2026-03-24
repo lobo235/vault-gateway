@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 // mockVaultClient implements vaultClient for testing.
@@ -433,5 +435,324 @@ func TestCreateSecrets_UnauthorizedPath(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+// --- Additional handler error path tests ---
+
+func TestCreateSecrets_WriteUnauthorized(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.writeErr = fmt.Errorf("unauthorized: vault path access denied")
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPost, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestReadSecrets_InvalidName(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/secrets/minecraft/-bad", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestReadSecrets_Unauthorized(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.readErr = fmt.Errorf("unauthorized: path denied")
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestUpdateSecrets_InvalidName(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPut, "/secrets/minecraft/BAD", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestUpdateSecrets_ReadUnauthorized(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.readErr = fmt.Errorf("unauthorized: path denied")
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPut, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestUpdateSecrets_ReadVaultError(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.readErr = fmt.Errorf("vault connection failed")
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPut, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+}
+
+func TestUpdateSecrets_WriteUnauthorized(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.secrets["mc-test"] = map[string]interface{}{"rcon_password": "old"}
+	mock.writeErr = fmt.Errorf("unauthorized: vault path access denied")
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPut, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestUpdateSecrets_WriteVaultError(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.secrets["mc-test"] = map[string]interface{}{"rcon_password": "old"}
+	mock.writeErr = fmt.Errorf("vault write failed")
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPut, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadGateway)
+	}
+}
+
+func TestDeleteSecrets_InvalidName(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodDelete, "/secrets/minecraft/BAD", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestDeleteSecrets_Unauthorized(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.deleteErr = fmt.Errorf("unauthorized: path denied")
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodDelete, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+}
+
+// --- Middleware helper tests ---
+
+func TestExtractBearer_Valid(t *testing.T) {
+	token := extractBearer("Bearer my-token-123")
+	if token != "my-token-123" {
+		t.Errorf("extractBearer() = %q, want 'my-token-123'", token)
+	}
+}
+
+func TestExtractBearer_NoPrefix(t *testing.T) {
+	token := extractBearer("my-token-123")
+	if token != "" {
+		t.Errorf("extractBearer() = %q, want empty string", token)
+	}
+}
+
+func TestExtractBearer_Empty(t *testing.T) {
+	token := extractBearer("")
+	if token != "" {
+		t.Errorf("extractBearer() = %q, want empty string", token)
+	}
+}
+
+func TestExtractBearer_WithWhitespace(t *testing.T) {
+	token := extractBearer("Bearer   my-token  ")
+	if token != "my-token" {
+		t.Errorf("extractBearer() = %q, want 'my-token'", token)
+	}
+}
+
+func TestTraceIDFromContext_Present(t *testing.T) {
+	ctx := context.WithValue(context.Background(), traceIDKey, "trace-abc")
+	id := traceIDFromContext(ctx)
+	if id != "trace-abc" {
+		t.Errorf("traceIDFromContext() = %q, want 'trace-abc'", id)
+	}
+}
+
+func TestTraceIDFromContext_Missing(t *testing.T) {
+	id := traceIDFromContext(context.Background())
+	if id != "" {
+		t.Errorf("traceIDFromContext() = %q, want empty string", id)
+	}
+}
+
+func TestGenerateTraceID_Format(t *testing.T) {
+	id := generateTraceID()
+	if len(id) != 32 {
+		t.Errorf("generateTraceID() length = %d, want 32 hex characters", len(id))
+	}
+	// Should be unique
+	id2 := generateTraceID()
+	if id == id2 {
+		t.Error("generateTraceID() returned duplicate values")
+	}
+}
+
+func TestIsUnauthorizedErr(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{fmt.Errorf("unauthorized: path denied"), true},
+		{fmt.Errorf("unauthorized: something"), true},
+		{fmt.Errorf("vault connection failed"), false},
+		{fmt.Errorf("permission denied"), false},
+	}
+	for _, tc := range cases {
+		got := isUnauthorizedErr(tc.err)
+		if got != tc.want {
+			t.Errorf("isUnauthorizedErr(%q) = %v, want %v", tc.err, got, tc.want)
+		}
+	}
+}
+
+// --- Server.Run tests ---
+
+func TestRun_StartsAndStops(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- srv.Run(ctx, ":0") // port 0 for random available port
+	}()
+
+	// Give the server a moment to start
+	time.Sleep(50 * time.Millisecond)
+
+	// Cancel context to trigger shutdown
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Errorf("Run() returned error: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run() did not shut down within 5 seconds")
+	}
+}
+
+// --- Response format tests ---
+
+func TestWriteError_Format(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	// Trigger a 401 error and check the response format
+	req := httptest.NewRequest(http.MethodGet, "/secrets/minecraft/mc-test", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusUnauthorized)
+	}
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want 'application/json'", ct)
+	}
+
+	var resp errorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+	if resp.Code == "" {
+		t.Error("error response code is empty")
+	}
+	if resp.Message == "" {
+		t.Error("error response message is empty")
+	}
+}
+
+func TestWriteJSON_ContentType(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	ct := w.Header().Get("Content-Type")
+	if ct != "application/json" {
+		t.Errorf("Content-Type = %q, want 'application/json'", ct)
+	}
+}
+
+// --- Method not allowed tests ---
+
+func TestMethodNotAllowed(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	// PATCH is not a registered method for /secrets/minecraft/{serverName}
+	req := httptest.NewRequest(http.MethodPatch, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	// Should get 405 or 404, not a panic
+	if w.Code == http.StatusOK {
+		t.Error("PATCH should not return 200")
 	}
 }
