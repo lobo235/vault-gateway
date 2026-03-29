@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Generic secret routes: POST/GET/PUT/DELETE `/secrets/{category}/{name}` for non-Minecraft workloads
+- Category and name validated with same `serverNamePattern` regex
+- Request body accepts arbitrary JSON key-value data (`{"data": {...}}`)
+- Tests for all generic secret CRUD operations and edge cases
+
 ## [v1.0.1] - 2026-03-24
 
 ### Fixed

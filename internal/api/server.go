@@ -49,6 +49,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /secrets/minecraft/{serverName}", auth(http.HandlerFunc(s.updateSecretsHandler())))
 	mux.Handle("DELETE /secrets/minecraft/{serverName}", auth(http.HandlerFunc(s.deleteSecretsHandler())))
 
+	// Generic secret routes (category/name based)
+	mux.Handle("POST /secrets/{category}/{name}", auth(http.HandlerFunc(s.createGenericSecretHandler())))
+	mux.Handle("GET /secrets/{category}/{name}", auth(http.HandlerFunc(s.readGenericSecretHandler())))
+	mux.Handle("PUT /secrets/{category}/{name}", auth(http.HandlerFunc(s.updateGenericSecretHandler())))
+	mux.Handle("DELETE /secrets/{category}/{name}", auth(http.HandlerFunc(s.deleteGenericSecretHandler())))
+
 	return requestLogger(s.log)(mux)
 }
 

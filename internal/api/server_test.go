@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -754,5 +755,277 @@ func TestMethodNotAllowed(t *testing.T) {
 	// Should get 405 or 404, not a panic
 	if w.Code == http.StatusOK {
 		t.Error("PATCH should not return 200")
+	}
+}
+
+// --- Generic secret tests ---
+
+func TestCreateGenericSecret_Success(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	body := `{"data":{"db_password":"s3cret","db_user":"admin"}}`
+	req := httptest.NewRequest(http.MethodPost, "/secrets/postgres/my-db", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	var resp createGenericSecretResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Category != "postgres" {
+		t.Errorf("category = %q, want postgres", resp.Category)
+	}
+	if resp.Name != "my-db" {
+		t.Errorf("name = %q, want my-db", resp.Name)
+	}
+	if !resp.Created {
+		t.Error("created = false, want true")
+	}
+	if !mock.writeCalled {
+		t.Error("WriteSecret was not called")
+	}
+	// Verify data was stored at the correct path
+	stored, ok := mock.secrets["postgres/my-db"]
+	if !ok {
+		t.Fatal("secret not stored at postgres/my-db")
+	}
+	if stored["db_password"] != "s3cret" {
+		t.Errorf("db_password = %q, want s3cret", stored["db_password"])
+	}
+	if stored["db_user"] != "admin" {
+		t.Errorf("db_user = %q, want admin", stored["db_user"])
+	}
+}
+
+func TestCreateGenericSecret_AlreadyExists(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.secrets["postgres/my-db"] = map[string]interface{}{"db_password": "existing"}
+	srv := newTestServer(t, mock)
+
+	body := `{"data":{"db_password":"new"}}`
+	req := httptest.NewRequest(http.MethodPost, "/secrets/postgres/my-db", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
+	}
+}
+
+func TestCreateGenericSecret_MissingBody(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPost, "/secrets/postgres/my-db", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateGenericSecret_EmptyData(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	body := `{"data":{}}`
+	req := httptest.NewRequest(http.MethodPost, "/secrets/postgres/my-db", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateGenericSecret_InvalidCategory(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	body := `{"data":{"key":"val"}}`
+	req := httptest.NewRequest(http.MethodPost, "/secrets/INVALID/my-db", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCreateGenericSecret_InvalidName(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	body := `{"data":{"key":"val"}}`
+	req := httptest.NewRequest(http.MethodPost, "/secrets/postgres/-bad", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestReadGenericSecret_Success(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.secrets["redis/cache1"] = map[string]interface{}{"password": "r3dis", "port": "6379"}
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/secrets/redis/cache1", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp readGenericSecretResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Category != "redis" {
+		t.Errorf("category = %q, want redis", resp.Category)
+	}
+	if resp.Name != "cache1" {
+		t.Errorf("name = %q, want cache1", resp.Name)
+	}
+	if resp.Data["password"] != "r3dis" {
+		t.Errorf("password = %q, want r3dis", resp.Data["password"])
+	}
+	if resp.Data["port"] != "6379" {
+		t.Errorf("port = %q, want 6379", resp.Data["port"])
+	}
+}
+
+func TestReadGenericSecret_NotFound(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/secrets/redis/nonexistent", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestUpdateGenericSecret_Success(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.secrets["redis/cache1"] = map[string]interface{}{"password": "old"}
+	srv := newTestServer(t, mock)
+
+	body := `{"data":{"password":"new-password","port":"6380"}}`
+	req := httptest.NewRequest(http.MethodPut, "/secrets/redis/cache1", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp updateGenericSecretResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Category != "redis" {
+		t.Errorf("category = %q, want redis", resp.Category)
+	}
+	if resp.Name != "cache1" {
+		t.Errorf("name = %q, want cache1", resp.Name)
+	}
+	if !resp.Updated {
+		t.Error("updated = false, want true")
+	}
+	// Verify data was overwritten
+	stored := mock.secrets["redis/cache1"]
+	if stored["password"] != "new-password" {
+		t.Errorf("password = %q, want new-password", stored["password"])
+	}
+}
+
+func TestUpdateGenericSecret_NotFound(t *testing.T) {
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	body := `{"data":{"password":"new"}}`
+	req := httptest.NewRequest(http.MethodPut, "/secrets/redis/nonexistent", bytes.NewBufferString(body))
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}
+
+func TestDeleteGenericSecret_Success(t *testing.T) {
+	mock := newMockVaultClient()
+	mock.secrets["redis/cache1"] = map[string]interface{}{"password": "pw"}
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodDelete, "/secrets/redis/cache1", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	var resp deleteGenericSecretResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.Category != "redis" {
+		t.Errorf("category = %q, want redis", resp.Category)
+	}
+	if resp.Name != "cache1" {
+		t.Errorf("name = %q, want cache1", resp.Name)
+	}
+	if !resp.Deleted {
+		t.Error("deleted = false, want true")
+	}
+	if mock.deleteName != "redis/cache1" {
+		t.Errorf("deleted name = %q, want redis/cache1", mock.deleteName)
+	}
+}
+
+func TestMinecraftRoutesStillWork(t *testing.T) {
+	// Verify that minecraft-specific routes are not broken by the generic routes
+	mock := newMockVaultClient()
+	srv := newTestServer(t, mock)
+
+	req := httptest.NewRequest(http.MethodPost, "/secrets/minecraft/mc-test", nil)
+	req.Header.Set("Authorization", "Bearer test-api-key")
+	w := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("minecraft POST status = %d, want %d", w.Code, http.StatusCreated)
+	}
+
+	// Verify it created with rcon_password (minecraft behavior), not generic behavior
+	var resp createSecretsResponse
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp.ServerName != "mc-test" {
+		t.Errorf("server_name = %q, want mc-test", resp.ServerName)
+	}
+	if _, ok := mock.secrets["mc-test"]["rcon_password"]; !ok {
+		t.Error("minecraft route did not auto-generate rcon_password")
 	}
 }

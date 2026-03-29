@@ -111,21 +111,32 @@ All routes except `/health` require `Authorization: Bearer <GATEWAY_API_KEY>`.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/health` | No | Ping Vault; return `{"status":"ok","version":"..."}` |
-| POST | `/secrets/minecraft/{serverName}` | Yes | Create secrets (auto-generates RCON password); 201 |
-| GET | `/secrets/minecraft/{serverName}` | Yes | Read secrets (returns RCON password); 200 |
+| POST | `/secrets/minecraft/{serverName}` | Yes | Create Minecraft secrets (auto-generates RCON password); 201 |
+| GET | `/secrets/minecraft/{serverName}` | Yes | Read Minecraft secrets (returns RCON password); 200 |
 | PUT | `/secrets/minecraft/{serverName}` | Yes | Rotate RCON password; 200 |
-| DELETE | `/secrets/minecraft/{serverName}` | Yes | Delete all secret versions; 200 |
+| DELETE | `/secrets/minecraft/{serverName}` | Yes | Delete all Minecraft secret versions; 200 |
+| POST | `/secrets/{category}/{name}` | Yes | Create generic secret (caller-supplied JSON data); 201 |
+| GET | `/secrets/{category}/{name}` | Yes | Read generic secret; 200 |
+| PUT | `/secrets/{category}/{name}` | Yes | Update generic secret; 200 |
+| DELETE | `/secrets/{category}/{name}` | Yes | Delete generic secret; 200 |
 
-### Server name validation
+### Name validation
 
-Server names must match `^[a-z0-9][a-z0-9-]{0,47}$`.
+Server names, categories, and names must match `^[a-z0-9][a-z0-9-]{0,47}$`.
 
 ### Vault paths
 
-- Read/write: `kv/data/nomad/default/{serverName}` (KV v2)
-- Delete all versions: `kv/metadata/nomad/default/{serverName}` (KV v2)
+- Minecraft: `kv/data/nomad/default/{serverName}` (KV v2)
+- Generic: `kv/data/nomad/default/{category}/{name}` (KV v2)
+- Delete all versions: `kv/metadata/nomad/default/...` (KV v2)
 
 All paths are validated to start with the expected prefix before any Vault call.
+
+### Generic secret request body
+
+```json
+{"data": {"key1": "value1", "key2": "value2"}}
+```
 
 ## Testing Approach
 

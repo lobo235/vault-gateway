@@ -1,12 +1,16 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"strings"
 
 	"github.com/lobo235/vault-gateway/internal/vault"
 )
+
+// maxRequestBodySize is the maximum allowed request body size (1 MiB).
+const maxRequestBodySize = 1 << 20
 
 // serverNamePattern validates Minecraft server names.
 var serverNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,47}$`)
@@ -213,6 +217,250 @@ func (s *Server) deleteSecretsHandler() http.HandlerFunc {
 		writeJSON(w, http.StatusOK, deleteSecretsResponse{
 			ServerName: serverName,
 			Deleted:    true,
+		})
+	}
+}
+
+// --- Generic secret types ---
+
+// genericSecretRequest is the request body for POST/PUT /secrets/{category}/{name}.
+type genericSecretRequest struct {
+	Data map[string]interface{} `json:"data"`
+}
+
+// createGenericSecretResponse is the response for POST /secrets/{category}/{name}.
+type createGenericSecretResponse struct {
+	Category string `json:"category"`
+	Name     string `json:"name"`
+	Created  bool   `json:"created"`
+}
+
+// readGenericSecretResponse is the response for GET /secrets/{category}/{name}.
+type readGenericSecretResponse struct {
+	Category string                 `json:"category"`
+	Name     string                 `json:"name"`
+	Data     map[string]interface{} `json:"data"`
+}
+
+// updateGenericSecretResponse is the response for PUT /secrets/{category}/{name}.
+type updateGenericSecretResponse struct {
+	Category string `json:"category"`
+	Name     string `json:"name"`
+	Updated  bool   `json:"updated"`
+}
+
+// deleteGenericSecretResponse is the response for DELETE /secrets/{category}/{name}.
+type deleteGenericSecretResponse struct {
+	Category string `json:"category"`
+	Name     string `json:"name"`
+	Deleted  bool   `json:"deleted"`
+}
+
+// createGenericSecretHandler handles POST /secrets/{category}/{name}.
+// Reads arbitrary key-value data from the request body and stores it in Vault.
+func (s *Server) createGenericSecretHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		category := r.PathValue("category")
+		name := r.PathValue("name")
+		traceID := traceIDFromContext(r.Context())
+
+		if !validateServerName(category) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "category must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+		if !validateServerName(name) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "name must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+
+		var reqBody genericSecretRequest
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_body", "request body must be valid JSON with a 'data' object")
+			return
+		}
+		if len(reqBody.Data) == 0 {
+			writeError(w, http.StatusBadRequest, "invalid_body", "data must not be empty")
+			return
+		}
+
+		secretPath := category + "/" + name
+
+		// Check if secret already exists
+		existing, err := s.vault.ReadSecret(secretPath)
+		if err != nil {
+			s.log.Error("failed to check existing secret", "category", category, "name", name, "error", err, "trace_id", traceID)
+			if isUnauthorizedErr(err) {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "vault path access denied")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "upstream_error", "failed to check existing secrets")
+			return
+		}
+		if existing != nil {
+			writeError(w, http.StatusConflict, "already_exists", "secret already exists at this path")
+			return
+		}
+
+		if err := s.vault.WriteSecret(secretPath, reqBody.Data); err != nil {
+			s.log.Error("failed to write secret", "category", category, "name", name, "error", err, "trace_id", traceID)
+			if isUnauthorizedErr(err) {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "vault path access denied")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "upstream_error", "failed to store secret in vault")
+			return
+		}
+
+		s.log.Info("created generic secret", "category", category, "name", name, "trace_id", traceID)
+		writeJSON(w, http.StatusCreated, createGenericSecretResponse{
+			Category: category,
+			Name:     name,
+			Created:  true,
+		})
+	}
+}
+
+// readGenericSecretHandler handles GET /secrets/{category}/{name}.
+func (s *Server) readGenericSecretHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		category := r.PathValue("category")
+		name := r.PathValue("name")
+		traceID := traceIDFromContext(r.Context())
+
+		if !validateServerName(category) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "category must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+		if !validateServerName(name) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "name must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+
+		secretPath := category + "/" + name
+
+		data, err := s.vault.ReadSecret(secretPath)
+		if err != nil {
+			s.log.Error("failed to read secret", "category", category, "name", name, "error", err, "trace_id", traceID)
+			if isUnauthorizedErr(err) {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "vault path access denied")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "upstream_error", "failed to read secret from vault")
+			return
+		}
+		if data == nil {
+			writeError(w, http.StatusNotFound, "not_found", "no secret found at this path")
+			return
+		}
+
+		writeJSON(w, http.StatusOK, readGenericSecretResponse{
+			Category: category,
+			Name:     name,
+			Data:     data,
+		})
+	}
+}
+
+// updateGenericSecretHandler handles PUT /secrets/{category}/{name}.
+// Reads arbitrary key-value data from the request body and overwrites the existing secret.
+func (s *Server) updateGenericSecretHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		category := r.PathValue("category")
+		name := r.PathValue("name")
+		traceID := traceIDFromContext(r.Context())
+
+		if !validateServerName(category) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "category must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+		if !validateServerName(name) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "name must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+
+		var reqBody genericSecretRequest
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_body", "request body must be valid JSON with a 'data' object")
+			return
+		}
+		if len(reqBody.Data) == 0 {
+			writeError(w, http.StatusBadRequest, "invalid_body", "data must not be empty")
+			return
+		}
+
+		secretPath := category + "/" + name
+
+		// Verify the secret exists before updating
+		existing, err := s.vault.ReadSecret(secretPath)
+		if err != nil {
+			s.log.Error("failed to check existing secret", "category", category, "name", name, "error", err, "trace_id", traceID)
+			if isUnauthorizedErr(err) {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "vault path access denied")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "upstream_error", "failed to check existing secrets")
+			return
+		}
+		if existing == nil {
+			writeError(w, http.StatusNotFound, "not_found", "no secret found at this path")
+			return
+		}
+
+		if err := s.vault.WriteSecret(secretPath, reqBody.Data); err != nil {
+			s.log.Error("failed to write secret", "category", category, "name", name, "error", err, "trace_id", traceID)
+			if isUnauthorizedErr(err) {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "vault path access denied")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "upstream_error", "failed to update secret in vault")
+			return
+		}
+
+		s.log.Info("updated generic secret", "category", category, "name", name, "trace_id", traceID)
+		writeJSON(w, http.StatusOK, updateGenericSecretResponse{
+			Category: category,
+			Name:     name,
+			Updated:  true,
+		})
+	}
+}
+
+// deleteGenericSecretHandler handles DELETE /secrets/{category}/{name}.
+// Deletes all versions of the secret using the metadata path.
+func (s *Server) deleteGenericSecretHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		category := r.PathValue("category")
+		name := r.PathValue("name")
+		traceID := traceIDFromContext(r.Context())
+
+		if !validateServerName(category) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "category must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+		if !validateServerName(name) {
+			writeError(w, http.StatusBadRequest, "invalid_body", "name must match pattern: ^[a-z0-9][a-z0-9-]{0,47}$")
+			return
+		}
+
+		secretPath := category + "/" + name
+
+		if err := s.vault.DeleteSecret(secretPath); err != nil {
+			s.log.Error("failed to delete secret", "category", category, "name", name, "error", err, "trace_id", traceID)
+			if isUnauthorizedErr(err) {
+				writeError(w, http.StatusUnauthorized, "unauthorized", "vault path access denied")
+				return
+			}
+			writeError(w, http.StatusBadGateway, "upstream_error", "failed to delete secret from vault")
+			return
+		}
+
+		s.log.Info("deleted generic secret", "category", category, "name", name, "trace_id", traceID)
+		writeJSON(w, http.StatusOK, deleteGenericSecretResponse{
+			Category: category,
+			Name:     name,
+			Deleted:  true,
 		})
 	}
 }

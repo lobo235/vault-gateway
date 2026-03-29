@@ -1,11 +1,12 @@
 # vault-gateway
 
-A narrowly-scoped HTTP API that wraps HashiCorp Vault for per-server secret management. Part of the [homelab-ai](https://github.com/lobo235/homelab-ai) platform.
+A narrowly-scoped HTTP API that wraps HashiCorp Vault for secret management. Part of the [homelab-ai](https://github.com/lobo235/homelab-ai) platform.
 
 ## What it does
 
 - Generates cryptographically random RCON passwords for Minecraft servers
 - Stores/reads/rotates/deletes secrets in Vault KV v2
+- Supports generic category-based secrets for non-Minecraft workloads
 - Authenticates to Vault via AppRole with automatic token renewal
 - Enforces strict path prefix validation (`kv/data/nomad/default/*`)
 
@@ -22,10 +23,14 @@ go run ./cmd/server
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Health check (unauthenticated) |
-| POST | `/secrets/minecraft/{serverName}` | Create secrets (auto-generates RCON password) |
-| GET | `/secrets/minecraft/{serverName}` | Read secrets |
+| POST | `/secrets/minecraft/{serverName}` | Create Minecraft secrets (auto-generates RCON password) |
+| GET | `/secrets/minecraft/{serverName}` | Read Minecraft secrets |
 | PUT | `/secrets/minecraft/{serverName}` | Rotate RCON password |
-| DELETE | `/secrets/minecraft/{serverName}` | Delete all secret versions |
+| DELETE | `/secrets/minecraft/{serverName}` | Delete all Minecraft secret versions |
+| POST | `/secrets/{category}/{name}` | Create generic secret (caller-supplied key-value data) |
+| GET | `/secrets/{category}/{name}` | Read generic secret |
+| PUT | `/secrets/{category}/{name}` | Update generic secret |
+| DELETE | `/secrets/{category}/{name}` | Delete generic secret |
 
 All endpoints except `/health` require `Authorization: Bearer <GATEWAY_API_KEY>`.
 
